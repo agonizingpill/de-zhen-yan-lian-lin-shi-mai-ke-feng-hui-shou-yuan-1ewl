@@ -44,10 +44,22 @@ docker compose exec -T backend python -m scripts.seed_demo
 6. 09:20，第 90 刻度记录新样 `WIN-GOOD-RELINE`，验证同麦位、同备用路、新版本。
 7. 09:22，复核员签复位，现场总音控保持 BUS-C；BUS-A 的三个协作点留存原配置。
 
+## 迟到补录与复判
+
+同一接线版本内，声检窗只要求「麦位 × 接线版本 × 刻度」唯一，不要求刻度和录入顺序递增。因此 09:14 才送达的 09:10 记录可以补回原刻度，即使该麦位已有更新时刻的声检。
+
+补录一条主路试听会重算这条线路在该刻度、该接线版本上的同期同频证据：
+
+- 证据集合变化的已签诊断不能再用旧计算凭证签发，也不能用于隔离。
+- 尚未隔离的失效诊断转为**待复判**，在同一声检窗上重新判别、重新签发，新发现以 `replaces` 指向旧结论，旧结论标为**旧结论**，诊断页可区分。
+- 已经执行隔离的诊断转为**已隔离依据**，保留当时的改线、签发证据和隔离单，不因补录被改写。
+
+补录、签发、隔离和复位共用 `patch_serial` 串行锁。并发时谁先取得锁谁先生效；后到的签发在锁内比对证据快照，发现变化即拒绝并要求重新判别，从而避免「补录已经生效、旧诊断仍然签发或隔离」的竞态。
+
 ## 算法与源文件
 
 `backend/domain/learning.py` 从固定种子 217 的 32 个正常基线窗拟合 RobustScaler，再用 8 邻居的 novelty LOF 评估四项特征。读数为峰值频率占比、持续回响指数、整体声级、自身回路关联，范围均为 0 到 1。LOF 分数小于 −1.55 时尝试寻找同总线同刻度的相邻频率峰。在主峰偏差 25 Hz 内、峰占比至少 0.62 且回响至少 0.52 的麦位达到三个，即标记协作频带并保留。复线签发另外要求回响指数不高于 0.36。模型与阈值用于模拟声检样例。
 
-`soundboard.py` 与 `interventions.py` 定义领域表。`soundcheck.py` 记录声检和配线版本，`diagnose.py` 固定快照并检查迟到的同频证据，`channel.py` 保护共享路、隔离独立点并复位。前端位于 `frontend/src/pages/`。状态枚举在 `backend/domain/states.py` 与 `frontend/src/audio-state.js`，权限枚举在 `backend/core/roles.py`、`frontend/src/store.js`，使用于数据库约束、强制业务路径和显示。
+`soundboard.py` 与 `interventions.py` 定义领域表。`soundcheck.py` 记录声检和配线版本并接受迟到补录，`evidence.py` 归并同线同刻证据并在补录后复判旧结论，`serial.py` 提供补录与签发的串行锁，`diagnose.py` 固定快照并校验证据后签发或复判，`channel.py` 保护共享路、隔离独立点并复位。`core/schema.py` 在已有 MySQL 数据卷上幂等补齐复判所需的列并回填证据。前端位于 `frontend/src/pages/`。状态枚举在 `backend/domain/states.py` 与 `frontend/src/audio-state.js`，权限枚举在 `backend/core/roles.py`、`frontend/src/store.js`，使用于数据库约束、强制业务路径和显示。
 
 源码以 MIT 许可提供，见 `LICENSE`。

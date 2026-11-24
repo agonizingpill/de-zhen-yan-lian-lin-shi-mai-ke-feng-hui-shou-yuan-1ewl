@@ -23,7 +23,10 @@ def calibration(conn):
 
 
 def same_slot(conn,focus):
-    return query(conn,windows,windows.c.slot==focus["slot"],windows.c.purpose=="live")
+    """同一接线版本、同一线路、同一刻度的在播声检窗，用于证据快照。"""
+    stmt=(select(windows).where(windows.c.slot==focus["slot"],windows.c.channel==focus["channel"],
+          windows.c.revision==focus["revision"],windows.c.purpose=="live").order_by(windows.c.code))
+    return [dict(row) for row in conn.execute(stmt).mappings()]
 
 
 def latest(conn,point,purpose):
@@ -45,4 +48,7 @@ def audio():
 
 def diagnosis():
     with transaction() as conn:
-        return query(conn,findings)
+        stmt=(select(findings,windows.c.point,windows.c.channel,windows.c.revision,windows.c.slot)
+              .join(windows,windows.c.code==findings.c.focus_window)
+              .order_by(windows.c.slot.desc(),findings.c.code.desc()).limit(160))
+        return [dict(row) for row in conn.execute(stmt).mappings()]

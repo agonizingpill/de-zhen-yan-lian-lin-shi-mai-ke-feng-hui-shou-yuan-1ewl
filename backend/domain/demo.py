@@ -1,5 +1,5 @@
 from random import Random
-from domain.channel import patch_mutex
+from domain.serial import patch_mutex
 from domain.soundboard import points, windows
 from domain.states import FEATURES
 

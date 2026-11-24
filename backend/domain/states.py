@@ -18,6 +18,13 @@ class Finding(StrEnum):
     NORMAL = "normal"
 
 
+class FindingState(StrEnum):
+    CURRENT = "current"
+    PENDING = "pending"
+    SUPERSEDED = "superseded"
+    RETAINED = "retained"
+
+
 class Ticket(StrEnum):
     ISOLATED = "isolated"
     RESTORED = "restored"

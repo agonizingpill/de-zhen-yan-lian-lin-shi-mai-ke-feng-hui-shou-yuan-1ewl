@@ -1,35 +1,35 @@
 from fastapi import HTTPException
 from sqlalchemy import select
 from core.audit import record
-from core.db import metadata,transaction
+from core.db import transaction
 from core.queueing import result,submit
-from domain.catalog import calibration,latest,one,same_slot
+from domain.catalog import calibration,latest,one
+from domain.evidence import line_slot
 from domain.interventions import findings,tickets
 from domain.learning import relative_to
+from domain.serial import lock_patch
 from domain.soundboard import points,windows
-from domain.states import Finding,Patch,Ticket
-from sqlalchemy import Column,Integer,Table
-
-patch_mutex=Table("patch_serial",metadata,Column("code",Integer,primary_key=True))
-
-
-def lock_patch(conn):
-    conn.execute(select(patch_mutex).with_for_update()).first()
+from domain.states import Finding,FindingState,Patch,Ticket
 
 
 def isolate(form,user):
     with transaction() as conn:
         lock_patch(conn)
-        note=one(conn,findings,form.finding)
+        note=one(conn,findings,form.finding,lock=True)
         old=one(conn,windows,note["focus_window"])
         point=one(conn,points,old["point"],lock=True)
         if note["category"]!=Finding.LOCAL:
             raise HTTPException(409,"同频协作或正常结果必须保留，不能据此局部隔离")
+        if note["state"]!=FindingState.CURRENT:
+            raise HTTPException(409,"该诊断已因补录失效或已处理，请用最新证据重新签发")
+        if note["evidence"] and sorted(set(note["evidence"]))!=sorted(set(
+                row["code"] for row in line_slot(conn,old))):
+            raise HTTPException(409,"该诊断的同线同刻证据已更新，请用新证据重新签发")
         if point["patch"]!=Patch.LIVE or point["revision"]!=old["revision"]:
             raise HTTPException(409,"麦位已经隔离或发现属于旧接线")
         if latest(conn,point,"live")["code"]!=old["code"]:
             raise HTTPException(409,"旧诊断不能覆盖本麦位的新声检窗")
-        if len(set(relative_to(old,same_slot(conn,old))))>=3:
+        if len(set(relative_to(old,line_slot(conn,old))))>=3:
             raise HTTPException(409,"当前同期窗口已形成同频协作，保留整条线路")
         occupied=conn.execute(select(points.c.code).where(points.c.channel==form.destination)).first()
         if form.destination==point["channel"] or occupied:
@@ -38,6 +38,9 @@ def isolate(form,user):
                      old_channel=point["channel"],new_channel=form.destination,state=Ticket.ISOLATED,isolated_by=user["sub"]))
         conn.execute(points.update().where(points.c.code==point["code"]).values(
             patch=Patch.ISOLATED,channel=form.destination,revision=point["revision"]+1))
+        # 隔离已经执行，诊断转为保留：继续作为当时的改线与签发依据。
+        conn.execute(findings.update().where(findings.c.code==note["code"])
+                     .values(state=FindingState.RETAINED))
         record(conn,user,f"isolate:{form.code}:{form.destination}")
         return one(conn,tickets,form.code)
 

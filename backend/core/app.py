@@ -15,7 +15,9 @@ from scripts.seed_demo import seed
 @asynccontextmanager
 async def lifespan(app):
     from core.db import engine
+    from core import schema
     metadata.create_all(engine)
+    schema.upgrade()
     if SEED_DEMO:
         try:
             seed()

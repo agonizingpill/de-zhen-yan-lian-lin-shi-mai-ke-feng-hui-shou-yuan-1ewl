@@ -1,6 +1,6 @@
 import {el} from '../dom.js';
 import {mixer} from '../audio-api.js';
-import {desk,feature} from '../audio-state.js';
+import {desk,findingStates,feature} from '../audio-state.js';
 import {choices,field,run,write} from '../audio-form.js';
 import {status,titleBlock} from '../widgets.js';
 import {wiring} from '../components/lines.js';
@@ -27,10 +27,18 @@ export async function capture(root,role) {
       for(const key of ['slot','frequency',...Object.keys(feature)]) input[key]=Number(input[key]);
       const item=await mixer.capture(input);
       desk.window=item.code;
-      await load(item.code+' 已保存至 '+item.channel+' · '+(item.purpose==='reline'?'复线试音':'主路试听'));
+      const label=item.purpose==='reline'?'复线试音':'主路试听';
+      const late=item.late?'（迟到记录，已按原刻度补录）':'';
+      const changed=item.reconciled&&item.reconciled.length ?
+        '；复判影响 '+item.reconciled.map(x=>x.code+'→'+findingStates[x.state]).join('、') : '';
+      await load(item.code+' 已保存至 '+item.channel+' · '+label+late+changed);
     }));
+    line.append(el('h2',{},'补录说明'),
+      el('p',{class:'hint'},'同一接线版本内，迟到记录可补到早于最新声检的刻度；'+
+        '补录使同线同刻证据变化时，未隔离的旧诊断转为待复判，已隔离的保留为改线依据。'));
   }
-  root.replaceChildren(titleBlock('安澜 · 演练音控','麦位与声检窗口','既有配线、声检时间和摘要特征一同记录。隔离状态下的新增声检归入复线试音。'),
+  root.replaceChildren(titleBlock('安澜 · 演练音控','麦位与声检窗口',
+    '既有配线、声检时间和摘要特征一同记录。迟到的同频记录可补回原刻度，并触发旧结论复判。'),
     el('div',{class:'mix'},line,edit));
   await load();
 }
